@@ -55,6 +55,7 @@ namespace updatedb
         static long filecount = 0;
         static long glbstart = -1;
         static Stopwatch indexsw;
+        static long delcount = 0;
 
         static ulong myhash1(string str)
         {
@@ -137,8 +138,23 @@ namespace updatedb
             return sql;
         }
 
+        static bool maybegetdelcount()
+        {
+            if (glbrootfolder.Length == 3 && !Directory.Exists(glbrootfolder) && glbstart != -1)
+            {
+                long end = glbstart + atrillion;
+                delcount = dbcount = readlong("SELECT count(id) FROM files" + Environment.NewLine +
+                    "JOIN folders ON folders.folderid = files.folderid" + Environment.NewLine +
+                    $"WHERE (folders.folderid BETWEEN {glbstart} AND {end}) and (folders.folder LIKE '{glbrootfolder}%')");
+                return true;
+            }
+            return false;
+        }
+
         static void readdb()
         {
+            if (maybegetdelcount())
+                return;
             string sql = getsql();
             string withslash, lowerroot;
             lowerroot = withslash = glbrootfolder.ToLower();
@@ -194,16 +210,16 @@ namespace updatedb
                     "BEGIN" + Environment.NewLine +
                         "INSERT INTO myfts2(docid, drive, filename, fileext)" + Environment.NewLine +
                         "VALUES (" + Environment.NewLine +
-                            "new.id, " + Environment.NewLine +
-                            "'#$' || UPPER(SUBSTR((select folder from folders where folderid = new.folderid), 1, 1)), " + Environment.NewLine +
-                            "(select folder from folders where folderid = new.folderid) || ' ' || new.filename, " + Environment.NewLine +
+                            "new.id," + Environment.NewLine +
+                            "'#$' || UPPER(SUBSTR((select folder from folders where folderid = new.folderid), 1, 1))," + Environment.NewLine +
+                            "(select folder from folders where folderid = new.folderid) || ' ' || new.filename," + Environment.NewLine +
                             "new.fileext" + Environment.NewLine +
                         ");" + Environment.NewLine +
                         "INSERT INTO myfts3(docid, drive, filename, fileext)" + Environment.NewLine +
                         "VALUES (" + Environment.NewLine +
-                            "new.id, " + Environment.NewLine +
-                            "'#$' || UPPER(SUBSTR((select folder from folders where folderid = new.folderid), 1, 1)), " + Environment.NewLine +
-                            "new.filename, " + Environment.NewLine +
+                            "new.id," + Environment.NewLine +
+                            "'#$' || UPPER(SUBSTR((select folder from folders where folderid = new.folderid), 1, 1))," + Environment.NewLine +
+                            "new.filename," + Environment.NewLine +
                             "new.fileext" + Environment.NewLine +
                         ");" + Environment.NewLine +
                     "END;";
@@ -263,13 +279,17 @@ namespace updatedb
 
         static void getdeletes()
         {
-            string fname;
-            foreach (KeyValuePair<ulong, ulong> k in dblookup)
+            if (delcount == 0)
             {
-                if (!disklookup.TryGetValue(k.Key, out fname))
-                    deletes.Add(k.Value);
+                string fname;
+                foreach (KeyValuePair<ulong, ulong> k in dblookup)
+                {
+                    if (!disklookup.TryGetValue(k.Key, out fname))
+                        deletes.Add(k.Value);
+                }
+                delcount = deletes.Count;
             }
-            Console.WriteLine("Deletes to do: " + deletes.Count.ToString("#,##0"));
+            Console.WriteLine("Deletes to do: " + delcount.ToString("#,##0"));
         }
 
         static string getins()
@@ -282,10 +302,25 @@ namespace updatedb
 
         static void dodeletes()
         {
-            if (deletes.Count == 0)
+            if (delcount == 0)
                 return;
             Stopwatch sw = Stopwatch.StartNew();
-            execsql("delete from files where id in " + getins());
+            if (deletes.Count == 0)
+            {
+                long end = glbstart + atrillion;
+                using (SQLiteCommand sqlite_cmd = sqlite_conn.CreateCommand())
+                {
+                    sqlite_cmd.CommandText = "DELETE FROM files" + Environment.NewLine +
+                        $"WHERE folderid IN (SELECT folderid FROM folders WHERE (folderid BETWEEN {glbstart} AND {end}) and" + Environment.NewLine +
+                        $"(folder LIKE '{glbrootfolder}%'))";
+                    sqlite_cmd.ExecuteNonQuery();
+                    sqlite_cmd.CommandText = "DELETE FROM folders" + Environment.NewLine +
+                        $"WHERE (folderid BETWEEN {glbstart} AND {end}) and (folder LIKE '{glbrootfolder}%')";
+                    sqlite_cmd.ExecuteNonQuery();
+                }
+            }
+            else
+                execsql("delete from files where id in " + getins());
             Console.WriteLine("Delete time: " + sw.Elapsed);
         }
 
@@ -470,8 +505,8 @@ namespace updatedb
             else
                 folder = "'" + folder + @"\%' OR folder LIKE '" + folder + "'";
             execsql("DELETE FROM folders" + Environment.NewLine +
-                $"WHERE (folderid BETWEEN {glbstart} AND {end}) and " + Environment.NewLine +
-                $"(folder LIKE {folder}) and " + Environment.NewLine +
+                $"WHERE (folderid BETWEEN {glbstart} AND {end}) and" + Environment.NewLine +
+                $"(folder LIKE {folder}) and" + Environment.NewLine +
                 "NOT EXISTS (SELECT 1 FROM files WHERE files.folderid = folders.folderid)");
             Console.WriteLine("Cleanup: " + sw.Elapsed);
         }
