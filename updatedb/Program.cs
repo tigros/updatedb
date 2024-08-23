@@ -350,12 +350,12 @@ namespace updatedb
         static Dictionary<ulong, ulong> getfolderids()
         {
             Dictionary<ulong, ulong> folderids = new Dictionary<ulong, ulong>();
-            string sql = getsql();
-            string withslash, lowerroot;
-            lowerroot = withslash = glbrootfolder.ToLower();
-            if (glbrootfolder.Length > 3)
-                withslash += '\\';
-
+            long end = glbstart + atrillion;
+            string folder = getfoldercriteria();
+            string sql = "SELECT folderid, folder FROM folders" + Environment.NewLine +
+                $"WHERE (folderid BETWEEN {glbstart} AND {end}) and" + Environment.NewLine +
+                $"(folder LIKE {folder})";
+            string foldername;
             SQLiteDataReader sqlite_datareader;
             using (SQLiteCommand sqlite_cmd = sqlite_conn.CreateCommand())
             {
@@ -365,19 +365,12 @@ namespace updatedb
                 {
                     try
                     {
-                        string foldername = sqlite_datareader.GetString(2).ToLower();
-                        if (foldername == lowerroot || foldername.StartsWith(withslash))
-                        {
-                            ulong hash = myhash(foldername);
-                            ulong fid;
-                            if (!folderids.TryGetValue(hash, out fid))
-                                folderids.Add(hash, (ulong)sqlite_datareader.GetInt64(3));
-                        }
+                        foldername = sqlite_datareader.GetString(1).ToLower();
+                        folderids.Add(myhash(foldername), (ulong)sqlite_datareader.GetInt64(0));
                     }
                     catch { }
                 }
             }
-
             return folderids;
         }
 
@@ -388,25 +381,21 @@ namespace updatedb
             long inscount = 0;
             Dictionary<ulong, ulong> folderids;
             Stopwatch sw = Stopwatch.StartNew();
-            string drive = "#$" + char.ToUpper(glbrootfolder[0]);
-            string sql = "select docid from myfts3 where myfts3 match '" + drive + "' limit 1";
-            long id = readlong(sql);
-            long folderid = -1;
-            if (id == -1)
+            string sql;
+            long id, folderid;
+            if (glbstart == -1)
             {
-                sql = "select max(id) from files";
-                id = readlong(sql);
-                folderid = id = (id / atrillion + 1) * atrillion + 1;
+                sql = "select max(folderid) from folders";
+                folderid = id = (readlong(sql) / atrillion + 1) * atrillion + 1;
                 folderids = new Dictionary<ulong, ulong>();
             }
             else
             {
                 folderids = getfolderids();
-                long start = id / atrillion * atrillion;
-                long end = start + atrillion;
-                sql = "select max(folderid)+1 from folders where folderid between " + start + " and " + end;
+                long end = glbstart + atrillion;
+                sql = "select max(folderid)+1 from folders where folderid between " + glbstart + " and " + end;
                 folderid = readlong(sql);
-                sql = "select max(id)+1 from files where id between " + start + " and " + end;
+                sql = "select max(id)+1 from files where id between " + glbstart + " and " + end;
                 id = readlong(sql);
             }
 
@@ -486,11 +475,22 @@ namespace updatedb
         static long getstart()
         {
             string drive = "#$" + char.ToUpper(glbrootfolder[0]);
-            string sql = "select docid from myfts3 where myfts3 match '" + drive + "' limit 1";
+            string sql = $"select docid from myfts3 where myfts3 match '{drive}' limit 1";
             long start = readlong(sql);
             if (start != -1)
                 start = start / atrillion * atrillion;
             return start;
+        }
+
+        static string getfoldercriteria()
+        {
+            string folder = glbrootfolder.Replace("'", "''");
+            if (folder.Length == 3)
+                folder = "'" + folder + "%'";
+            else
+                folder = "'" + folder + @"\%' OR folder LIKE '" + folder + "'";
+            return folder;
+
         }
 
         static void cleanup()
@@ -499,11 +499,7 @@ namespace updatedb
                 return;
             Stopwatch sw = Stopwatch.StartNew();
             long end = glbstart + atrillion;
-            string folder = glbrootfolder.Replace("'", "''");
-            if (folder.Length == 3)
-                folder = "'" + folder + "%'";
-            else
-                folder = "'" + folder + @"\%' OR folder LIKE '" + folder + "'";
+            string folder = getfoldercriteria();
             execsql("DELETE FROM folders" + Environment.NewLine +
                 $"WHERE (folderid BETWEEN {glbstart} AND {end}) and" + Environment.NewLine +
                 $"(folder LIKE {folder}) and" + Environment.NewLine +
@@ -550,40 +546,32 @@ namespace updatedb
 
                 Console.WriteLine("Reading " + glbrootfolder);
 
-                Thread thr1 = null;
+                Thread thr = null;
                 if (Directory.Exists(glbrootfolder))
                 {
-                    thr1 = new Thread(() => ReadFileList(glbrootfolder));
-                    thr1.IsBackground = true;
-                    thr1.Start();
+                    thr = new Thread(() => ReadFileList(glbrootfolder));
+                    thr.IsBackground = true;
+                    thr.Start();
                 }
 
                 syncoffchkindex();
                 maketriggers();
 
-                Thread thr2 = new Thread(readdb);
-                thr2.IsBackground = true;
-                thr2.Start();
-
-                if (thr1 != null)
-                    thr1.Join();
-                thr2.Join();
+                readdb();
+                if (thr != null)
+                    thr.Join();
 
                 if (filecount >= 10000)
                     Console.WriteLine("\r" + filecount.ToString("#,##0"));
                 Console.WriteLine("Disk file count: " + filecount.ToString("#,##0"));
                 Console.WriteLine("DB file count: " + dbcount.ToString("#,##0"));
 
-                thr1 = new Thread(getinserts);
-                thr1.IsBackground = true;
-                thr1.Start();
+                thr = new Thread(getinserts);
+                thr.IsBackground = true;
+                thr.Start();
 
-                thr2 = new Thread(getdeletes);
-                thr2.IsBackground = true;
-                thr2.Start();
-
-                thr1.Join();
-                thr2.Join();
+                getdeletes();
+                thr.Join();
 
                 dodeletes();
                 doinserts();
