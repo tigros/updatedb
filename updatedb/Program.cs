@@ -126,7 +126,7 @@ namespace updatedb
 
         static string getsql()
         {
-            string drive = "#$" + char.ToUpper(glbrootfolder[0]);
+            string drive = "#$" + glbrootfolder[0];
             string sql;
             if (glbrootfolder.Length > 3)
             {
@@ -157,7 +157,7 @@ namespace updatedb
                 return;
             string sql = getsql();
             string withslash, lowerroot;
-            lowerroot = withslash = glbrootfolder.ToLower();
+            lowerroot = withslash = glbrootfolder.ToLowerInvariant();
             if (glbrootfolder.Length > 3)
                 withslash += '\\';
 
@@ -170,10 +170,10 @@ namespace updatedb
                 {
                     try
                     {
-                        string folder = sqlite_datareader.GetString(2).ToLower();
+                        string folder = sqlite_datareader.GetString(2).ToLowerInvariant();
                         if (folder == lowerroot || folder.StartsWith(withslash))
                         {
-                            string fname = Path.Combine(folder, sqlite_datareader.GetString(1).ToLower());
+                            string fname = Path.Combine(folder, sqlite_datareader.GetString(1).ToLowerInvariant());
                             dblookup.Add(myhash(fname), (ulong)sqlite_datareader.GetInt64(0));
                             dbcount++;
                         }
@@ -242,7 +242,7 @@ namespace updatedb
 
                         try
                         {
-                            ulong hash = myhash(sanitize(afile).ToLower());
+                            ulong hash = myhash(sanitize(afile).ToLowerInvariant());
                             lock (disklookup)
                             {
                                 disklookup.Add(hash, afile);
@@ -365,7 +365,7 @@ namespace updatedb
                 {
                     try
                     {
-                        foldername = sqlite_datareader.GetString(1).ToLower();
+                        foldername = sqlite_datareader.GetString(1).ToLowerInvariant();
                         folderids.Add(myhash(foldername), (ulong)sqlite_datareader.GetInt64(0));
                     }
                     catch { }
@@ -408,7 +408,7 @@ namespace updatedb
                         string folder = file.Substring(0, file.LastIndexOf('\\'));
                         if (folder.Length == 2)
                             folder += '\\';
-                        ulong hash = myhash(sanitize(folder).ToLower());
+                        ulong hash = myhash(sanitize(folder).ToLowerInvariant());
                         string filename = Path.GetFileNameWithoutExtension(file);
                         string ext = Path.GetExtension(file);
                         if (ext == "")
@@ -443,7 +443,7 @@ namespace updatedb
 
         static bool isletter(char c)
         {
-            char upperChar = char.ToUpper(c);
+            char upperChar = char.ToUpperInvariant(c);
             return upperChar >= 'A' && upperChar <= 'Z';
         }
 
@@ -474,7 +474,7 @@ namespace updatedb
 
         static long getstart()
         {
-            string drive = "#$" + char.ToUpper(glbrootfolder[0]);
+            string drive = "#$" + glbrootfolder[0];
             string sql = $"select docid from myfts3 where myfts3 match '{drive}' limit 1";
             long start = readlong(sql);
             if (start != -1)
@@ -507,6 +507,16 @@ namespace updatedb
             Console.WriteLine("Cleanup: " + sw.Elapsed);
         }
 
+        static string toproper(string s)
+        {
+            try
+            {
+                return s.Substring(0, 1).ToUpperInvariant() + s.Substring(1);
+            }
+            catch { }
+            return s;
+        }
+
         static void Main(string[] args)
         {
             Console.WriteLine("IntegriTech updatedb for mysys database. (C) 2024 IntegriTech Inc. - https://integritech.ca");
@@ -534,6 +544,7 @@ namespace updatedb
                     Console.WriteLine("Invalid folder! Usage: updatedb \"X:\\folder name\"");
                     return;
                 }
+                glbrootfolder = toproper(glbrootfolder);
                 if (glbrootfolder.Length > 3)
                     glbrootfolder = glbrootfolder.TrimEnd('\\');
 
@@ -601,7 +612,7 @@ namespace updatedb
 
         static bool IsRunningFromConsole()
         {
-            string parentProcessName = GetParentProcessName().ToLower();
+            string parentProcessName = GetParentProcessName().ToLowerInvariant();
             return parentProcessName == "cmd" || parentProcessName == "powershell" || parentProcessName == "pwsh" || parentProcessName == "bash" ||
                 parentProcessName == "taskeng";
         }
