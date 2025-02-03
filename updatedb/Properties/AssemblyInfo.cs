@@ -10,7 +10,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("IntegriTech Inc.")]
 [assembly: AssemblyProduct("updatedb")]
-[assembly: AssemblyCopyright("© 2024 IntegriTech Inc. (https://integritech.ca)")]
+[assembly: AssemblyCopyright("© 2025 IntegriTech Inc. (https://integritech.ca)")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

@@ -143,10 +143,9 @@ namespace updatedb
         {
             if (glbrootfolder.Length == 3 && !Directory.Exists(glbrootfolder) && glbstart != -1)
             {
-                long end = glbstart + atrillion;
                 delcount = dbcount = readlong("SELECT count(id) FROM files" + Environment.NewLine +
                     "JOIN folders ON folders.folderid = files.folderid" + Environment.NewLine +
-                    $"WHERE (folders.folderid BETWEEN {glbstart} AND {end}) and (folders.folder LIKE '{glbrootfolder}%')");
+                    $"WHERE folders.folder LIKE '{glbrootfolder}%'");
                 return true;
             }
             return false;
@@ -311,15 +310,13 @@ namespace updatedb
             Stopwatch sw = Stopwatch.StartNew();
             if (deletes.Count == 0)
             {
-                long end = glbstart + atrillion;
                 using (SQLiteCommand sqlite_cmd = sqlite_conn.CreateCommand())
                 {
                     sqlite_cmd.CommandText = "DELETE FROM files" + Environment.NewLine +
-                        $"WHERE folderid IN (SELECT folderid FROM folders WHERE (folderid BETWEEN {glbstart} AND {end}) and" + Environment.NewLine +
-                        $"(folder LIKE '{glbrootfolder}%'))";
+                        $"WHERE folderid IN (SELECT folderid FROM folders WHERE folder LIKE '{glbrootfolder}%')";
                     sqlite_cmd.ExecuteNonQuery();
                     sqlite_cmd.CommandText = "DELETE FROM folders" + Environment.NewLine +
-                        $"WHERE (folderid BETWEEN {glbstart} AND {end}) and (folder LIKE '{glbrootfolder}%')";
+                        $"WHERE folder LIKE '{glbrootfolder}%'";
                     sqlite_cmd.ExecuteNonQuery();
                 }
             }
@@ -351,11 +348,9 @@ namespace updatedb
         static Dictionary<ulong, ulong> getfolderids()
         {
             Dictionary<ulong, ulong> folderids = new Dictionary<ulong, ulong>();
-            long end = glbstart + atrillion;
             string folder = getfoldercriteria();
             string sql = "SELECT folderid, folder FROM folders" + Environment.NewLine +
-                $"WHERE (folderid BETWEEN {glbstart} AND {end}) and" + Environment.NewLine +
-                $"(folder LIKE {folder})";
+                $"WHERE folder LIKE {folder}";
             string foldername;
             SQLiteDataReader sqlite_datareader;
             using (SQLiteCommand sqlite_cmd = sqlite_conn.CreateCommand())
@@ -523,11 +518,9 @@ namespace updatedb
             if (glbstart == -1)
                 return;
             Stopwatch sw = Stopwatch.StartNew();
-            long end = glbstart + atrillion;
             string folder = getfoldercriteria();
             execsql("DELETE FROM folders" + Environment.NewLine +
-                $"WHERE (folderid BETWEEN {glbstart} AND {end}) and" + Environment.NewLine +
-                $"(folder LIKE {folder}) and" + Environment.NewLine +
+                $"WHERE (folder LIKE {folder}) and" + Environment.NewLine +
                 "NOT EXISTS (SELECT 1 FROM files WHERE files.folderid = folders.folderid)");
             Console.WriteLine("Cleanup: " + sw.Elapsed);
         }
