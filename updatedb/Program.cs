@@ -3,22 +3,21 @@ Utility program to update a single folder or drive in a mysys database. Saves ti
 On a newly created database, it will create 2 extra indexes which may take some time, but once they're created the next run(s) will be much faster.
 This is for more advanced users with at least 5 million files, otherwise might as well just create a new database since it doesn't take very long.
 
-The usage is simple: updatedb "X:\folder name"
+The usage is simple: updatedb "X:\folder name" [-nr]
 You can also use a dot to specify current folder, or a folder name relative to it.
 Use quotes if the path contains spaces.
+New in version 1.1, you can add -nr switch for non-recursive folder scan. It can be placed before or after the folder name.
 
 Might be a good idea to use an elevated cmd prompt to include restricted files, if any.
-Now in mysys, if you have tabs opened, click Search to refresh. If a drive was added or deleted, however, you'd need to open a new tab for it to be reflected in the Drives drop down list.
+Now in mysys, click Search to refresh affected tabs. If a drive was added or deleted, however, you'd need to open a new tab for it to be reflected in the Drives drop down list.
 
-If you don't have mysys, give it a try. You can read more about it and download from https://integritech.ca, it is free to try for a full year! Full featured! Not even a nag nor ads.
+If you don't have mysys, give it a try, you won't regret it! You can read more about it and download from https://integritech.ca, it is free to try for a full year! Full featured! Not even a nag nor ads.
 
-For convenience, I've also included signed copies of MysysSetup.zip and FoxitReader10.1.0.37527_Setup.zip right here in the Releases section.
+For convenience, signed copies of MysysSetup.zip and FoxitReader10.1.0.37527_Setup.zip are included in the Releases section.
 
 Never have trouble finding (or playing, or viewing) your files again, system wide!
 
-Be assured there is no communication done by mysys to any servers whatsoever, well apart from the built-in web browser which can, but it was more intended for viewing local files.
-
-Kindly star the repo if you find the software useful, thanks a bunch!
+Rest assured there is no communication done by mysys to any server whatsoever, well apart from the built-in web browser which can, but it was more intended for viewing local files.
 
 IntegriTech Inc.
 https://integritech.ca
@@ -45,17 +44,20 @@ namespace updatedb
         static string DBPath = Path.Combine(AppDataPath, "mysys.db");
         const string basesql = "select files.id, files.filename || (case length(files.fileext) when 1 then '' else files.fileext end) as filename, folders.folder, " +
             "folders.folderid from myfts2 inner join folders on folders.folderid = files.folderid join files on myfts2.docid = files.id where myfts2 match '{}'";
+        const string basesqlnr = "select files.id, files.filename || (case length(files.fileext) when 1 then '' else files.fileext end) as filename, folders.folder, " +
+            "folders.folderid from folders inner join files on files.folderid = folders.folderid where folders.folder COLLATE NOCASE = '{}'";
         static Dictionary<ulong, ulong> dblookup = new Dictionary<ulong, ulong>();
         static Dictionary<ulong, string> disklookup = new Dictionary<ulong, string>();
         static SQLiteConnection sqlite_conn = null;
         static ArrayList deletes = new ArrayList(30000);
         static ArrayList inserts = new ArrayList(30000);
-        static string glbrootfolder;
+        static string glbrootfolder = "";
         static long dbcount = 0;
         static long filecount = 0;
         static long glbstart = -1;
         static Stopwatch indexsw;
         static long delcount = 0;
+        static bool glbnr = false;
 
         static ulong myhash1(string str)
         {
@@ -111,7 +113,7 @@ namespace updatedb
         static SQLiteConnection CreateConnection()
         {
             SQLiteConnection sqlite_conn;
-            sqlite_conn = new SQLiteConnection(@"Data Source=" + DBPath + "; Version = 3; New = True; Compress = True; ");
+            sqlite_conn = new SQLiteConnection(@"Data Source=" + DBPath + "; Version = 3; Compress = True; ");
             try
             {
                 sqlite_conn.Open();
@@ -128,11 +130,10 @@ namespace updatedb
         {
             string drive = "#$" + glbrootfolder[0];
             string sql;
-            if (glbrootfolder.Length > 3)
-            {
-                string rootfolder = glbrootfolder.Replace(":", "").Replace('\\', ' ').Replace("'", "''");
-                sql = basesql.Replace("{}", '"' + rootfolder + "\" " + drive);
-            }
+            if (glbnr)
+                sql = basesqlnr.Replace("{}", glbrootfolder);
+            else if (glbrootfolder.Length > 3)
+                sql = basesql.Replace("{}", '"' + glbrootfolder.Replace(":", "").Replace('\\', ' ').Replace("'", "''") + "\" " + drive);
             else
                 sql = basesql.Replace("{}", drive);
             return sql;
@@ -171,7 +172,7 @@ namespace updatedb
                     try
                     {
                         string folder = sqlite_datareader.GetString(2).ToLowerInvariant();
-                        if (folder == lowerroot || folder.StartsWith(withslash))
+                        if (glbnr || folder == lowerroot || folder.StartsWith(withslash))
                         {
                             string fname = Path.Combine(folder, sqlite_datareader.GetString(1).ToLowerInvariant());
                             dblookup.Add(myhash(fname), (ulong)sqlite_datareader.GetInt64(0));
@@ -256,6 +257,9 @@ namespace updatedb
                         }
                     });
 
+                    if (glbnr)
+                        return;
+
                     var directories = Directory.GetDirectories(rootFolderPath);
                     Parallel.ForEach(directories, ReadFileList);
                 }
@@ -327,17 +331,14 @@ namespace updatedb
         static long readlong(string sql)
         {
             long ret = -1;
-            SQLiteDataReader sqlite_datareader;
             try
             {
                 using (SQLiteCommand sqlite_cmd = sqlite_conn.CreateCommand())
                 {
                     sqlite_cmd.CommandText = sql;
-                    sqlite_datareader = sqlite_cmd.ExecuteReader();
-                    if (!sqlite_datareader.HasRows)
-                        return ret;
-                    sqlite_datareader.Read();
-                    ret = sqlite_datareader.GetInt64(0);
+                    object result = sqlite_cmd.ExecuteScalar();
+                    if (result != null && result != DBNull.Value)
+                        ret = Convert.ToInt64(result);
                 }
             }
             catch (Exception ex)
@@ -463,12 +464,35 @@ namespace updatedb
             }
         }
 
+        static bool chknocase()
+        {
+            bool res = false;
+            try
+            {   // need new connection otherwise will lock table and can't do drop.
+                using (var readConn = new SQLiteConnection(@"Data Source=" + DBPath + "; Version = 3; Compress = True;"))
+                {
+                    readConn.Open();
+                    using (var cmd = new SQLiteCommand("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_folders_folder' AND sql LIKE '%COLLATE NOCASE%';", readConn))
+                        res = (long)cmd.ExecuteScalar() > 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+            }
+            return res;
+        }
+
+
         static void syncoffchkindex()
         {
             indexsw = Stopwatch.StartNew();
             execsql("PRAGMA synchronous=OFF; PRAGMA journal_mode=MEMORY;" + Environment.NewLine +
-                "CREATE INDEX IF NOT EXISTS idx_folders_folder ON folders(folder);" + Environment.NewLine +
+                "CREATE INDEX IF NOT EXISTS idx_folders_folder ON folders(folder COLLATE NOCASE);" + Environment.NewLine +
                 "CREATE INDEX IF NOT EXISTS idx_files_folderid ON files(folderid);");
+            if (!chknocase())  // re-create index when previous version of updatedb was used.
+                execsql("DROP INDEX idx_folders_folder;" + Environment.NewLine +
+                    "CREATE INDEX idx_folders_folder ON folders(folder COLLATE NOCASE);");
             indexsw.Stop();
         }
 
@@ -485,12 +509,13 @@ namespace updatedb
         static string getfoldercriteria()
         {
             string folder = glbrootfolder.Replace("'", "''");
-            if (folder.Length == 3)
+            if (glbnr)
+                folder = "'" + folder + "'";
+            else if (folder.Length == 3)
                 folder = "'" + folder + "%'";
             else
                 folder = "'" + folder + @"\%' OR folder LIKE '" + folder + "'";
             return folder;
-
         }
 
         static void cleanup()
@@ -517,9 +542,25 @@ namespace updatedb
             return s;
         }
 
+        static bool setglbs(string[] args)
+        {
+            if (args.Length == 0 || args.Length > 2)
+                return false;
+
+            foreach (string arg in args)
+            {
+                if (arg.Equals("-nr", StringComparison.OrdinalIgnoreCase))
+                    glbnr = true;
+                else
+                    glbrootfolder = arg.Trim();
+            }
+
+            return glbrootfolder != "" && (args.Length == 1 || glbnr);
+        }
+
         static void Main(string[] args)
         {
-            Console.WriteLine("IntegriTech updatedb for mysys database. (C) 2024 IntegriTech Inc. - https://integritech.ca");
+            Console.WriteLine("IntegriTech updatedb for mysys database. (C) 2025 IntegriTech Inc. - https://integritech.ca");
             try
             {
                 if (!File.Exists(DBPath))
@@ -527,21 +568,22 @@ namespace updatedb
                     Console.WriteLine(DBPath + " not found!");
                     return;
                 }
-                if (args.Length == 0)
+                if (!setglbs(args))
                 {
-                    Console.WriteLine("Usage: updatedb \"X:\\folder name\"");
+                    Console.WriteLine("Usage: updatedb \"X:\\folder name\" [-nr]");
                     Console.WriteLine("For current folder: updatedb .");
                     Console.WriteLine("Names relative to current folder are fine too.");
                     Console.WriteLine("Putting a drive or folder that no longer exists will proceed to delete it from the database.");
+                    Console.WriteLine("Use -nr switch for non-recursive folder scan.");
                     return;
                 }
-                glbrootfolder = args[0].Trim();
+
                 if (Directory.Exists(glbrootfolder))
                     glbrootfolder = Path.GetFullPath(glbrootfolder);
                 else if (glbrootfolder.Length < 3 || !isletter(glbrootfolder[0]) || glbrootfolder[1] != ':' || glbrootfolder[2] != '\\')
                 {
 
-                    Console.WriteLine("Invalid folder! Usage: updatedb \"X:\\folder name\"");
+                    Console.WriteLine("Invalid folder! Usage: updatedb \"X:\\folder name\" [-nr]");
                     return;
                 }
                 glbrootfolder = toproper(glbrootfolder);
@@ -553,10 +595,8 @@ namespace updatedb
                 if (sqlite_conn == null)
                     return;
 
-                glbstart = getstart();
-
                 Console.WriteLine("Reading " + glbrootfolder);
-
+                
                 Thread thr = null;
                 if (Directory.Exists(glbrootfolder))
                 {
@@ -567,7 +607,7 @@ namespace updatedb
 
                 syncoffchkindex();
                 maketriggers();
-
+                glbstart = getstart();
                 readdb();
                 if (thr != null)
                     thr.Join();
