@@ -129,11 +129,12 @@ namespace updatedb
         static string getsql()
         {
             string drive = "#$" + glbrootfolder[0];
+            string folder = glbrootfolder.Replace("'", "''");
             string sql;
             if (glbnr)
-                sql = basesqlnr.Replace("{}", glbrootfolder);
+                sql = basesqlnr.Replace("{}", folder);
             else if (glbrootfolder.Length > 3)
-                sql = basesql.Replace("{}", '"' + glbrootfolder.Replace(":", "").Replace('\\', ' ').Replace("'", "''") + "\" " + drive);
+                sql = basesql.Replace("{}", '"' + folder.Replace(":", "").Replace('\\', ' ') + "\" " + drive);
             else
                 sql = basesql.Replace("{}", drive);
             return sql;
