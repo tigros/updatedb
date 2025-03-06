@@ -526,14 +526,35 @@ namespace updatedb
             Console.WriteLine("Cleanup: " + sw.Elapsed);
         }
 
-        static string toproper(string s)
+        // thanks to ChatGPT!
+        static string GetActualCase(string path)
         {
-            try
+            path = Path.GetFullPath(path);
+            string[] parts = path.Split(new[] { Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+            string currentPath = parts[0].ToUpperInvariant() + Path.DirectorySeparatorChar;
+
+            for (int i = 1; i < parts.Length; i++)
             {
-                return s.Substring(0, 1).ToUpperInvariant() + s.Substring(1);
+                if (!Directory.Exists(currentPath))
+                {
+                    for (; i < parts.Length; i++)
+                        currentPath = Path.Combine(currentPath, parts[i]);
+                    break;
+                }
+
+                string correctName = GetCorrectFolderName(currentPath, parts[i]);
+                currentPath = Path.Combine(currentPath, correctName);
             }
-            catch { }
-            return s;
+            return currentPath;
+        }
+
+        static string GetCorrectFolderName(string parentPath, string folderName)
+        {
+            string[] directories = Directory.GetDirectories(parentPath);
+            foreach (string dir in directories)
+                if (string.Equals(Path.GetFileName(dir), folderName, StringComparison.OrdinalIgnoreCase))
+                    return Path.GetFileName(dir);
+            return folderName;
         }
 
         static bool setglbs(string[] args)
@@ -572,18 +593,8 @@ namespace updatedb
                     return;
                 }
 
-                if (Directory.Exists(glbrootfolder))
-                    glbrootfolder = Path.GetFullPath(glbrootfolder);
-                else if (glbrootfolder.Length < 3 || !isletter(glbrootfolder[0]) || glbrootfolder[1] != ':' || glbrootfolder[2] != '\\')
-                {
-
-                    Console.WriteLine("Invalid folder! Usage: updatedb \"X:\\folder name\" [-nr]");
-                    return;
-                }
-                glbrootfolder = toproper(glbrootfolder);
-                if (glbrootfolder.Length > 3)
-                    glbrootfolder = glbrootfolder.TrimEnd('\\');
-
+                glbrootfolder = GetActualCase(glbrootfolder);
+                
                 Stopwatch sw = Stopwatch.StartNew();
                 sqlite_conn = CreateConnection();
                 if (sqlite_conn == null)
@@ -716,5 +727,8 @@ namespace updatedb
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool CloseHandle(IntPtr hObject);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
+        static extern int GetLongPathName(string shortPath, StringBuilder longPath, int buffer);
     }
 }
